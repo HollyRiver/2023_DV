@@ -1,0 +1,132 @@
+---
+title: "NYCTaxi"
+author: "강신성"
+format: dashboard
+execute: 
+  enabled: true
+  cache: false
+  freeze: false
+---
+
+```{python}
+#| output: false
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.io as pio
+
+pd.options.plotting.backend = "plotly"
+pio.templates.default = "plotly_white"
+
+df = pd.read_csv("https://raw.githubusercontent.com/guebin/DV2023/main/posts/NYCTaxi.csv").assign(
+    log_trip_duration = lambda df: np.log(df.trip_duration),
+    pickup_datetime = lambda df: df.pickup_datetime.apply(pd.to_datetime),
+    dropoff_datetime = lambda df: df.dropoff_datetime.apply(pd.to_datetime),
+    dist = lambda df: np.sqrt((df.pickup_latitude-df.dropoff_latitude)**2 + (df.pickup_longitude-df.dropoff_longitude)**2),
+    #---#
+    vendor_id = lambda df: df.vendor_id.map({1:'A',2:'B'})
+).assign(
+    speed = lambda df: df.dist / df.trip_duration,
+    pickup_hour = lambda df: df.pickup_datetime.dt.hour,
+    dropoff_hour = lambda df: df.dropoff_datetime.dt.hour,
+    dayofweek = lambda df: df.pickup_datetime.dt.dayofweek
+)
+df_small = df[::100].reset_index(drop=True)
+
+
+df_featured = df[['pickup_datetime']].assign(avg_speed = df.dist / df.trip_duration)\
+.assign(dow = lambda _df : _df.pickup_datetime.dt.dayofweek)\
+.assign(pickup_hour = lambda _df : _df.pickup_datetime.dt.hour).drop('pickup_datetime', axis = 1)\
+.pivot_table(index = 'pickup_hour', columns = 'dow', values = 'avg_speed', aggfunc = 'mean').stack().reset_index()\
+.rename({'dow' : '요일', 'pickup_hour' : 'pickup 시간', 0 : '평균속력'}, axis = 1)\
+.assign(요일 = lambda _df : _df.요일.map({0:'월',1:'화',2:'수',3:'목',4:'금',5:'토',6:'일'}))
+
+df_featured2 = df[['pickup_datetime']].assign(avg_dist = df.dist)\
+.assign(dow = lambda _df : _df.pickup_datetime.dt.dayofweek)\
+.assign(pickup_hour = lambda _df : _df.pickup_datetime.dt.hour).drop('pickup_datetime', axis = 1)\
+.pivot_table(index = 'dow', columns = 'pickup_hour', values = 'avg_dist', aggfunc = 'mean').stack().reset_index()\
+.rename({'dow' : '요일', 'pickup_hour' : 'pickup 시간', 0 : '평균이동거리'}, axis = 1)\
+.assign(요일 = lambda _df : _df.요일.map({0:'월',1:'화',2:'수',3:'목',4:'금',5:'토',6:'일'}))
+
+df_pickup = df_small.assign(avg_speed = lambda _df : pd.qcut(_df.speed, q = 4, labels=['매우느림 (path)','조금느림 (path)','조금빠름 (path)','매우빠름 (path)'])).sort_values('avg_speed')\
+.loc[:,['id', 'avg_speed', 'pickup_latitude', 'pickup_longitude', 'dropoff_latitude', 'dropoff_longitude', 'passenger_count']]\
+.drop(['dropoff_latitude', 'dropoff_longitude'], axis = 1).rename({'pickup_latitude' : 'latitude', 'pickup_longitude' : 'longitude'}, axis = 1)
+df_dropoff = df_small.assign(avg_speed = lambda _df : pd.qcut(_df.speed, q = 4, labels=['매우느림 (path)','조금느림 (path)','조금빠름 (path)','매우빠름 (path)'])).sort_values('avg_speed')\
+.loc[:,['id', 'avg_speed', 'pickup_latitude', 'pickup_longitude', 'dropoff_latitude', 'dropoff_longitude', 'passenger_count']]\
+.drop(['pickup_latitude', 'pickup_longitude'], axis = 1).rename({'dropoff_latitude' : 'latitude', 'dropoff_longitude' : 'longitude'}, axis = 1)
+df_featured3 = pd.concat([df_pickup, df_dropoff], axis = 0).reset_index(drop = True).rename({'avg_speed' : '평균속력'}, axis = 1)
+
+
+fig1 = px.density_heatmap(
+    data_frame = df_featured,
+    x = 'pickup 시간',
+    y = '요일',
+    z = '평균속력',
+    nbinsx = 24,
+    nbinsy = 7,
+)
+
+fig1.update_layout(coloraxis_colorbar={'title':'평균속력'})
+
+fig2 = px.density_heatmap(
+    data_frame = df_featured2,
+    x = 'pickup 시간',
+    y = '요일',
+    z = '평균이동거리',
+    nbinsx = 24,
+    nbinsy = 7,
+)
+
+fig2.update_layout(coloraxis_colorbar={'title':'평균이동거리'})
+
+fig3 = px.line_mapbox(
+    data_frame = df_featured3,
+    lat = 'latitude',
+    lon = 'longitude',
+    color = '평균속력',
+    line_group = 'id',
+    center = {'lat' : 40.7322, 'lon' : -73.9052},
+    #---#
+    mapbox_style = 'carto-positron',
+    zoom = 11
+)
+
+points = px.scatter_mapbox(
+    data_frame = df_featured3,
+    lat = 'latitude',
+    lon = 'longitude',
+    color = '평균속력',
+    size = 'passenger_count',
+    size_max = 10,
+    #---#
+    mapbox_style = 'carto-positron',
+    zoom = 11
+).data
+
+fig3.add_traces(p)
+
+fig3.update_traces(line = {'width' : 1})
+fig3.data[-1].update(name = '매우빠름 (pickup/dropoff)')
+fig3.data[-2].update(name = '조금빠름 (pickup/dropoff)')
+fig3.data[-3].update(name = '조금느림 (pickup/dropoff)')
+fig3.data[-4].update(name = '매우느림 (pickup/dropoff)')
+```
+
+# 기말고사1-(1),(2)
+
+```{python}
+#| title: 요일,시간에 따른 평균속력 시각화        
+fig1.show()
+```
+
+```{python}
+#| title: 요일,시간에 따른 평균이동거리 시각화        
+fig2.show()
+```
+
+# 기말고사1-(3)
+
+```{python}
+#| title: 속력별 경로 시각화
+fig3.show()
+```
